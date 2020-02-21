@@ -90,7 +90,7 @@ FUNCTION yourviewer .
 *"     VALUE(DB_TABLE) TYPE  ALTTAB
 *"     VALUE(ONLY_DATA) TYPE  BOOLE_D DEFAULT 'X'
 *"     VALUE(COLUMNS_LIST_TO_DISPLAY) TYPE  STRING OPTIONAL
-*"     VALUE(MAX_NUMBER_OF_ROWS) TYPE  INT4 DEFAULT 1000
+*"     VALUE(MAX_NUMBER_OF_ROWS) TYPE  INT4 DEFAULT 100
 *"     VALUE(CRITERIA_TABLE) TYPE  RSPARAMS_TT OPTIONAL
 *"     VALUE(ADDITIONAL_COMMAND) TYPE  STRING OPTIONAL
 *"  EXPORTING
@@ -130,6 +130,7 @@ FUNCTION yourviewer .
         criteria_row          LIKE LINE OF criteria_tab,
         temp_columns_list     LIKE columns_list,
         field_info            TYPE dfies,
+        fields_info           TYPE dfies_tab,
         timer                 TYPE REF TO if_abap_runtime,
         range_tab_type        TYPE REF TO cl_abap_tabledescr,
         final_tab_type        TYPE REF TO cl_abap_tabledescr,
@@ -364,7 +365,8 @@ FUNCTION yourviewer .
   ENDIF.
 
   " Get keys
-  LOOP AT final_structure_type->get_ddic_field_list( ) INTO field_info WHERE keyflag EQ abap_true.
+  fields_info = final_structure_type->get_ddic_field_list( ).
+  LOOP AT fields_info INTO field_info WHERE keyflag EQ abap_true.
     IF key_fields_list IS INITIAL.
       key_fields_list = field_info-fieldname.
     ELSE.
