@@ -397,7 +397,6 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
   TYPES: BEGIN OF dd02l_row,
     tabname   TYPE tadir-obj_name,
     tabclass  TYPE dd02l-tabclass,
-    viewclass TYPE dd02l-viewclass,
   END OF dd02l_row,
   dd02l_tab TYPE HASHED TABLE OF dd02l_row WITH UNIQUE KEY tabname.
 
@@ -452,9 +451,10 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
       FROM tadir
       INTO TABLE repo_tables
       FOR ALL ENTRIES IN tables
-      WHERE pgmid    EQ 'R3TR' AND
-            object   EQ 'TABL' AND
-            obj_name EQ tables-tabname.
+      WHERE pgmid    EQ 'R3TR'         AND
+            object   EQ 'TABL'         AND
+            obj_name EQ tables-tabname AND
+            devclass NE '$TMP'.
 
     IF sy-subrc EQ 0.
 
@@ -495,12 +495,13 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
       READ TABLE tables_org_texts ASSIGNING <obj_text> WITH KEY tabname = <final_row>-obj_name.
     ENDIF.
 
-    " Object type, T - transparent, C - cluester, P - pool
+    " Object type, T - Transparent, C - Cluster, P - Pooled
     csv_row-object_type = <dd02l_row>-tabclass(1).
     csv_row-object_name = <dd02l_row>-tabname.
     csv_row-package     = <final_row>-devclass.
     IF <obj_text> IS ASSIGNED.
       csv_row-object_text = <obj_text>-ddtext.
+      SHIFT csv_row-object_text LEFT DELETING LEADING space.
     ENDIF.
     CONCATENATE csv_row-object_type csv_row-object_name csv_row-package csv_row-object_text
     INTO csv_line SEPARATED BY data_separator.
@@ -509,7 +510,7 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
   CLEAR: tables,repo_tables,tables_eng_texts,tables_org_texts.
 
   " Database views (D) and Projection views (P)
-  SELECT tabname tabclass viewclass
+  SELECT tabname viewclass
     FROM dd02l
     INTO TABLE views
     WHERE as4local  EQ 'A' AND
@@ -524,9 +525,10 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
       FROM tadir
       INTO TABLE repo_views
       FOR ALL ENTRIES IN views
-      WHERE pgmid    EQ 'R3TR' AND
-            object   EQ 'VIEW' AND
-            obj_name EQ views-tabname.
+      WHERE pgmid    EQ 'R3TR'        AND
+            object   EQ 'VIEW'        AND
+            obj_name EQ views-tabname AND
+            devclass NE '$TMP'.
 
     IF sy-subrc EQ 0.
 
@@ -568,11 +570,12 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
     ENDIF.
 
     " Object type, VP - Projection view, VD - Database view
-    CONCATENATE <dd02l_row>-tabclass(1) <dd02l_row>-viewclass INTO csv_row-object_type.
+    CONCATENATE 'V' <dd02l_row>-tabclass INTO csv_row-object_type.
     csv_row-object_name = <dd02l_row>-tabname.
     csv_row-package     = <final_row>-devclass.
     IF <obj_text> IS ASSIGNED.
       csv_row-object_text = <obj_text>-ddtext.
+      SHIFT csv_row-object_text LEFT DELETING LEADING space.
     ENDIF.
     CONCATENATE csv_row-object_type csv_row-object_name csv_row-package csv_row-object_text
     INTO csv_line SEPARATED BY data_separator.
