@@ -1,12 +1,13 @@
 " Help for ranges handling - class def.
 CLASS lcl_range DEFINITION.
   PUBLIC SECTION.
-    CONSTANTS: co_sign_component   TYPE string VALUE 'SIGN',
-               co_sign_data_type   TYPE string VALUE 'DDSIGN',
-               co_option_component TYPE string VALUE 'OPTION',
-               co_option_data_type TYPE string VALUE 'DDOPTION',
-               co_low_component    TYPE string VALUE 'LOW',
-               co_high_component   TYPE string VALUE 'HIGH'.
+    CONSTANTS: co_sign_component   TYPE string   VALUE 'SIGN',
+               co_sign_data_type   TYPE string   VALUE 'DDSIGN',
+               co_option_component TYPE string   VALUE 'OPTION',
+               co_option_data_type TYPE string   VALUE 'DDOPTION',
+               co_low_component    TYPE string   VALUE 'LOW',
+               co_high_component   TYPE string   VALUE 'HIGH',
+               co_alpha            TYPE convexit VALUE 'ALPHA'.
 
     " Add new range line
     CLASS-METHODS add_range_line IMPORTING iv_sign   TYPE ddsign
@@ -19,10 +20,57 @@ CLASS lcl_range DEFINITION.
     CLASS-METHODS get_range_from_sap IMPORTING iv_parameter_name TYPE rsscr_name
                                                it_parameters     TYPE rsparams_tt
                                      CHANGING  ct_range          TYPE ANY TABLE.
+  PRIVATE SECTION.
+    CLASS-METHODS convert_format CHANGING cv_value TYPE any.
 ENDCLASS.
 
 " Help for ranges handling - class imp.
 CLASS lcl_range IMPLEMENTATION.
+  METHOD convert_format.
+
+    DATA: abap_element TYPE REF TO cl_abap_elemdescr,
+          field_info   TYPE rsanu_s_fieldinfo,
+          dd_interface TYPE dfies.
+
+    abap_element ?= cl_abap_elemdescr=>describe_by_data( cv_value ).
+    IF abap_element->is_ddic_type( ) NE abap_true.
+      RETURN.
+    ENDIF.
+
+    dd_interface = abap_element->get_ddic_field( 'E' ).
+    IF dd_interface-convexit IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Run alpha input conversion
+    IF dd_interface-convexit EQ co_alpha.
+      TRY .
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+            EXPORTING
+              input  = cv_value
+            IMPORTING
+              output = cv_value.
+        CATCH cx_root.
+      ENDTRY.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " Try to run other than alpha input conversions
+        MOVE-CORRESPONDING dd_interface TO field_info.
+        CALL METHOD cl_rsan_ut_conversion_exit=>try_conv_int_ext_int
+          EXPORTING
+            i_fieldinfo              = field_info
+            i_value                  = cv_value
+            i_conversion_errors_type = '*'
+          IMPORTING
+            e_value                  = cv_value.
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+
+  ENDMETHOD.
+
   METHOD add_range_line.
 
     DATA: range_line TYPE REF TO data,
@@ -51,11 +99,13 @@ CLASS lcl_range IMPLEMENTATION.
     ASSIGN COMPONENT co_low_component OF STRUCTURE <range> TO <component>.
     IF sy-subrc EQ 0.
       MOVE iv_low TO <component>.
+      convert_format( CHANGING cv_value = <component> ).
     ENDIF.
     IF iv_high IS SUPPLIED AND iv_high IS NOT INITIAL.
       ASSIGN COMPONENT co_high_component OF STRUCTURE <range> TO <component>.
       IF sy-subrc EQ 0.
         MOVE iv_high TO <component>.
+        convert_format( CHANGING cv_value = <component> ).
       ENDIF.
     ENDIF.
 
@@ -83,14 +133,14 @@ CLASS lcl_range IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-FUNCTION yourviewer .
+FUNCTION yourviewer.
 *"----------------------------------------------------------------------
 *"*"Local Interface:
 *"  IMPORTING
 *"     VALUE(DB_TABLE) TYPE  ALTTAB
 *"     VALUE(ONLY_DATA) TYPE  BOOLE_D DEFAULT 'X'
 *"     VALUE(COLUMNS_LIST_TO_DISPLAY) TYPE  STRING OPTIONAL
-*"     VALUE(MAX_NUMBER_OF_ROWS) TYPE  INT4 DEFAULT 100
+*"     VALUE(MAX_NUMBER_OF_ROWS) TYPE  INT4 DEFAULT 1000
 *"     VALUE(CRITERIA_TABLE) TYPE  RSPARAMS_TT OPTIONAL
 *"     VALUE(ADDITIONAL_COMMAND) TYPE  STRING OPTIONAL
 *"  EXPORTING
@@ -107,51 +157,53 @@ FUNCTION yourviewer .
            id    TYPE tvarv_val,
            range TYPE REF TO data,
          END OF range_list_s,
-  range_list_t TYPE STANDARD TABLE OF range_list_s.
+         range_list_t TYPE STANDARD TABLE OF range_list_s.
 
   CONSTANTS: final_line_length TYPE i           VALUE 512,
              data_separator    TYPE c           VALUE `|`,
              dash              TYPE c           VALUE `-`,
              underscore        TYPE c           VALUE `_`,
+             dot               TYPE c           VALUE `.`,
+             colon             TYPE c           VALUE `:`,
              event_type        TYPE dbglevtype  VALUE `FUNC`,
              event_name        TYPE dbglevent   VALUE `YOURVIEWER`.
 
-  DATA: columns_list          TYPE STANDARD TABLE OF string,
-        range_components_row  TYPE cl_abap_structdescr=>component,
-        range_components_tab  TYPE cl_abap_structdescr=>component_table,
-        range_list_row        TYPE range_list_s,
-        range_list_tab        TYPE range_list_t,
-        main_criteria_tab     TYPE rsparams_tt,
-        rtts_components_row   TYPE abap_compdescr,
-        call_stack            TYPE sys_callst,
-        call_stack_row        TYPE sys_calls,
-        range_half_template   LIKE range_components_tab,
-        criteria_tab          LIKE criteria_table,
-        criteria_row          LIKE LINE OF criteria_tab,
-        temp_columns_list     LIKE columns_list,
-        field_info            TYPE dfies,
-        fields_info           TYPE dfies_tab,
-        timer                 TYPE REF TO if_abap_runtime,
-        range_tab_type        TYPE REF TO cl_abap_tabledescr,
-        final_tab_type        TYPE REF TO cl_abap_tabledescr,
-        final_structure_type  TYPE REF TO cl_abap_structdescr,
-        range_row_type        TYPE REF TO cl_abap_datadescr,
-        final_row_type        TYPE REF TO cl_abap_datadescr,
-        range_vector_type     TYPE REF TO cl_abap_datadescr,
-        range_data            TYPE REF TO data,
-        final_data            TYPE REF TO data,
-        vector_of_ranges      TYPE REF TO data,
-        first_value           TYPE abap_bool,
-        sql_where_clause      TYPE string,
-        temp_string           TYPE string,
-        final_string          TYPE string,
-        final_line            TYPE string,
-        column_name           TYPE string,
-        us_time               TYPE p LENGTH 16,
-        text_offset           TYPE i,
-        text_length           TYPE i,
-        start_time            TYPE i,
-        end_time              TYPE i.
+  DATA: columns_list         TYPE STANDARD TABLE OF string,
+        range_components_row TYPE cl_abap_structdescr=>component,
+        range_components_tab TYPE cl_abap_structdescr=>component_table,
+        range_list_row       TYPE range_list_s,
+        range_list_tab       TYPE range_list_t,
+        main_criteria_tab    TYPE rsparams_tt,
+        rtts_components_row  TYPE abap_compdescr,
+        call_stack           TYPE sys_callst,
+        call_stack_row       TYPE sys_calls,
+        range_half_template  LIKE range_components_tab,
+        criteria_tab         LIKE criteria_table,
+        criteria_row         LIKE LINE OF criteria_tab,
+        temp_columns_list    LIKE columns_list,
+        field_info           TYPE dfies,
+        fields_info          TYPE dfies_tab,
+        timer                TYPE REF TO if_abap_runtime,
+        range_tab_type       TYPE REF TO cl_abap_tabledescr,
+        final_tab_type       TYPE REF TO cl_abap_tabledescr,
+        final_structure_type TYPE REF TO cl_abap_structdescr,
+        range_row_type       TYPE REF TO cl_abap_datadescr,
+        final_row_type       TYPE REF TO cl_abap_datadescr,
+        range_vector_type    TYPE REF TO cl_abap_datadescr,
+        range_data           TYPE REF TO data,
+        final_data           TYPE REF TO data,
+        vector_of_ranges     TYPE REF TO data,
+        first_value          TYPE abap_bool,
+        sql_where_clause     TYPE string,
+        temp_string          TYPE string,
+        final_string         TYPE string,
+        final_line           TYPE string,
+        column_name          TYPE string,
+        us_time              TYPE p LENGTH 16,
+        text_offset          TYPE i,
+        text_length          TYPE i,
+        start_time           TYPE i,
+        end_time             TYPE i.
 
   FIELD-SYMBOLS: <range_table> TYPE STANDARD TABLE,
                  <final_table> TYPE STANDARD TABLE,
@@ -195,8 +247,7 @@ FUNCTION yourviewer .
     us_time = end_time - start_time.
     processing_time_ms = us_time / 1000.
     CONCATENATE sy-sysid underscore sy-mandt INTO data_origin.
-    CONCATENATE sy-datum underscore sy-uzeit INTO date_time.
-
+    CONCATENATE sy-datum(4) dot sy-datum+4(2) dot sy-datum+6 underscore sy-uzeit(2) colon sy-uzeit+2(2) colon sy-uzeit+4 INTO date_time.
     RETURN.
   ENDIF.
 
@@ -319,7 +370,7 @@ FUNCTION yourviewer .
   " Number of retrieved rows, source system, date and time of dataset
   rows_number = sy-dbcnt.
   CONCATENATE sy-sysid underscore sy-mandt INTO data_origin.
-  CONCATENATE sy-datum underscore sy-uzeit INTO date_time.
+  CONCATENATE sy-datum(4) dot sy-datum+4(2) dot sy-datum+6 underscore sy-uzeit(2) colon sy-uzeit+2(2) colon sy-uzeit+4 INTO date_time.
 
   LOOP AT <final_table> ASSIGNING <final_row>.
 
@@ -395,37 +446,37 @@ FORM iit_get_tabular_objects USING db_table                TYPE alttab
                                       rows_number          TYPE int4
                                       dataset              TYPE stringtab.
   TYPES: BEGIN OF dd02l_row,
-    tabname   TYPE tadir-obj_name,
-    tabclass  TYPE dd02l-tabclass,
-  END OF dd02l_row,
-  dd02l_tab TYPE HASHED TABLE OF dd02l_row WITH UNIQUE KEY tabname.
+           tabname  TYPE tadir-obj_name,
+           tabclass TYPE dd02l-tabclass,
+         END OF dd02l_row,
+         dd02l_tab TYPE HASHED TABLE OF dd02l_row WITH UNIQUE KEY tabname.
 
   TYPES: BEGIN OF final_row,
-    obj_name   TYPE dd02t-tabname,
-    devclass   TYPE tadir-devclass,
-    masterlang TYPE tadir-masterlang,
-  END OF final_row,
-  final_tab TYPE HASHED TABLE OF final_row WITH UNIQUE KEY obj_name.
+           obj_name   TYPE dd02t-tabname,
+           devclass   TYPE tadir-devclass,
+           masterlang TYPE tadir-masterlang,
+         END OF final_row,
+         final_tab TYPE HASHED TABLE OF final_row WITH UNIQUE KEY obj_name.
 
   TYPES: BEGIN OF dd02t_row,
-    tabname TYPE dd02t-tabname,
-    ddtext  TYPE dd02t-ddtext,
-  END OF dd02t_row,
-  dd02t_tab TYPE HASHED TABLE OF dd02t_row WITH UNIQUE KEY tabname.
+           tabname TYPE dd02t-tabname,
+           ddtext  TYPE dd02t-ddtext,
+         END OF dd02t_row,
+         dd02t_tab TYPE HASHED TABLE OF dd02t_row WITH UNIQUE KEY tabname.
 
   TYPES: BEGIN OF csv_row,
-    object_type TYPE string,
-    object_name TYPE string,
-    object_text TYPE string,
-    package     TYPE string,
-  END OF csv_row.
+           object_type TYPE string,
+           object_name TYPE string,
+           object_text TYPE string,
+           package     TYPE string,
+         END OF csv_row.
 
-  DATA: tables TYPE dd02l_tab,
-        views  TYPE dd02l_tab,
-        repo_tables TYPE final_tab,
-        repo_views  TYPE final_tab,
-        csv_row     TYPE csv_row,
-        csv_line    TYPE string,
+  DATA: tables           TYPE dd02l_tab,
+        views            TYPE dd02l_tab,
+        repo_tables      TYPE final_tab,
+        repo_views       TYPE final_tab,
+        csv_row          TYPE csv_row,
+        csv_line         TYPE string,
         tables_eng_texts TYPE dd02t_tab,
         tables_org_texts TYPE dd02t_tab,
         views_eng_texts  TYPE dd02t_tab,
